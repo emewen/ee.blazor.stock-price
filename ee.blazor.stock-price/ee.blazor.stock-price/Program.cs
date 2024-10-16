@@ -1,5 +1,7 @@
+using Azure.Messaging.ServiceBus;
 using ee.blazor.stock_price.Client.Pages;
 using ee.blazor.stock_price.Components;
+using ee.blazor.stock_price.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -7,6 +9,22 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents()
     .AddInteractiveWebAssemblyComponents();
+
+builder.Services.AddSingleton<CosmosContainerClient>();
+builder.Services.AddSingleton<StockService>();
+var retryOptions = new ServiceBusRetryOptions
+{
+    Mode = ServiceBusRetryMode.Exponential,
+    MaxRetries = 3,
+    Delay = TimeSpan.FromSeconds(2),
+    MaxDelay = TimeSpan.FromSeconds(30)
+};
+var clientOptions = new ServiceBusClientOptions
+{
+    RetryOptions = retryOptions
+};
+builder.Services.AddSingleton(new ServiceBusClient("Endpoint=sb://ericewentenant-stock-price-namespace.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=W/PCxrbdHcAN+eqMMnFBavofmaJAVkM6Q+ASbMUNjc8=", clientOptions));
+builder.Services.AddSingleton<ServiceBusProcessorService>();
 
 var app = builder.Build();
 

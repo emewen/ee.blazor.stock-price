@@ -1,0 +1,133 @@
+﻿@page "/stocklist"
+@rendermode InteractiveServer
+@implements IDisposable
+@using ee.blazor.stock_price.Data
+@using Azure.Messaging.ServiceBus
+@inject StockService stockService
+@inject ServiceBusProcessorService processorService
+
+<h3>Stock List refreshes in @_counter</h3>
+
+@if (stocks == null)
+{
+    <div class="progress">
+        <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100" style="width: 75%"></div>
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover">
+            <thead class="thead-light">
+                <tr>
+                    <th>Symbol</th>
+                    <th>Price</th>
+                    <th>Range</th>
+                    <th>Timestamp</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var stock in stocks)
+                {
+                    <tr>
+                        <td>@stock.symbol</td>
+                        <td>@stock.price</td>
+                        <td>@stock.range</td>
+                        <td>@stock.timestamp</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+<button @onclick="StartProcessing">Start Processing</button>
+
+@if (receivedMessages.Any())
+{
+    <h4>Received Messages:</h4>
+
+    <div class="list-group overflow-auto shadow" style="max-height: 300px;">
+        @foreach (var message in receivedMessages)
+        {
+            <div>@message</div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public List<Stock>? stocks { get; set; }
+    private static System.Timers.Timer _timer;
+    private int _counter = 10;
+    private ServiceBusProcessor processor;
+    private List<string> receivedMessages = new List<string>();
+
+    protected override async Task OnInitializedAsync()
+    {
+        stocks = await stockService.GetStocks();
+    }
+
+    protected override void OnInitialized()
+    {
+        _timer = new System.Timers.Timer(1000);
+        _timer.Elapsed += CountDownTimer;
+        _timer.Enabled = true;
+    }
+
+    public async void CountDownTimer(Object source, System.Timers.ElapsedEventArgs e)
+    {
+        if (_counter > 0)
+        {
+            _counter -= 1;
+        }
+        else
+        {
+            _counter = 10;
+            stocks = await stockService.GetStocks();
+        }
+
+        await InvokeAsync(async () =>
+        {
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+    }
+
+    private async Task StartProcessing()
+    {
+        string queueName = "ericewentenant-stock-action-queue";
+        processor = processorService.GetProcessorForTopicAndSubscription(queueName);
+        // Set up message handler
+        processor.ProcessMessageAsync += ProcessMessages;
+        // Set up error handler
+        processor.ProcessErrorAsync += ErrorHandler;
+        // Start processing
+        await processor.StartProcessingAsync();
+    }
+
+    private async Task ProcessMessages(ProcessMessageEventArgs args)
+    {
+        var body = args.Message.Body.ToString();
+        Console.WriteLine($"Received message: {body}");
+        // Update the UI with the received message
+        await InvokeAsync(() =>
+        {
+            receivedMessages.Add(body);
+            StateHasChanged();
+        });
+        // Complete the message
+        await args.CompleteMessageAsync(args.Message);
+    }
+
+    private Task ErrorHandler(ProcessErrorEventArgs args)
+    {
+        Console.WriteLine($"Error source: {args.Exception.Source}, Exception: {args.Exception.Message}");
+        // Log the error
+        return Task.CompletedTask;
+    }
+}
